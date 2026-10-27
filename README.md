@@ -22,6 +22,7 @@ Check it is up:
 ```sh
 curl http://localhost:8000/up
 curl http://localhost:8000/api/v1/ping
+curl http://localhost:8000/api/v1/hello   # asks every service for its hello message
 ```
 
 ## JWT keys
