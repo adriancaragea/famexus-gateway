@@ -2,6 +2,8 @@
 
 namespace Database\Factories;
 
+use App\Enums\Role;
+use App\Models\Family;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
@@ -41,5 +43,18 @@ class UserFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'email_verified_at' => null,
         ]);
+    }
+
+    /**
+     * Make the user a member of a family (a new one unless given).
+     */
+    public function inFamily(Role $role = Role::Owner, ?Family $family = null): static
+    {
+        return $this->afterCreating(function (User $user) use ($role, $family) {
+            ($family ?? Family::factory()->create())->members()->create([
+                'user_id' => $user->id,
+                'role' => $role,
+            ]);
+        });
     }
 }

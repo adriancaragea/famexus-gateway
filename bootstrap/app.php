@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\RequireFamilyMember;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -15,6 +16,13 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // Cookie-based SPA auth for the React app (Laravel Sanctum).
         $middleware->statefulApi();
+
+        $middleware->alias([
+            'family' => RequireFamilyMember::class,
+        ]);
+
+        // This is a JSON API: a missing login is a 401, never a redirect.
+        $middleware->redirectGuestsTo(fn () => null);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

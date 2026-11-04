@@ -2,10 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\FamilyMember;
+use App\Models\User;
 use App\Services\ServiceToken;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -15,14 +18,20 @@ use Illuminate\Support\Facades\Http;
  */
 class HelloController extends Controller
 {
-    public function __invoke(ServiceToken $tokens): JsonResponse
+    public function __invoke(Request $request, ServiceToken $tokens): JsonResponse
     {
+        /** @var User $user */
+        $user = $request->user();
+        /** @var FamilyMember $membership */
+        $membership = $user->membership;
+        $claims = $membership->claims();
+
         /** @var array<string, string> $services */
         $services = config('famexus.services');
 
         $responses = Http::pool(fn (Pool $pool) => collect($services)
             ->map(fn (string $url, string $name) => $pool->as($name)
-                ->withToken($tokens->for($name))
+                ->withToken($tokens->for($name, $claims))
                 ->acceptJson()
                 ->timeout(3)
                 ->get(rtrim($url, '/').'/api/v1/hello'))
