@@ -1,9 +1,72 @@
 openapi: 3.1.0
 info:
   title: Famexus Gateway
-  version: 0.1.0
+  version: 0.2.0
+  description: |
+    The only API the React app talks to. Sign-in uses a Laravel Sanctum cookie
+    session: call `GET /sanctum/csrf-cookie` first, then send the `XSRF-TOKEN`
+    cookie back as the `X-XSRF-TOKEN` header on every POST, PUT, PATCH and DELETE.
+    Requests must come from a stateful domain (`SANCTUM_STATEFUL_DOMAINS`).
 servers:
+  - url: http://localhost/api/v1
+    description: Through Caddy (the usual way)
   - url: http://localhost:8000/api/v1
+    description: The gateway container directly
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: famexus-gateway-session
+  schemas:
+    Role:
+      type: string
+      enum: [owner, adult, child]
+    Me:
+      type: object
+      properties:
+        id: { type: string, description: ULID, example: 01JBX7Q3M6V0K8Y2T5R9N4D1PA }
+        name: { type: string }
+        email: { type: string, format: email }
+        family:
+          type: [object, 'null']
+          properties:
+            id: { type: string, description: ULID }
+            name: { type: string }
+        role: { oneOf: [{ $ref: '#/components/schemas/Role' }, { type: 'null' }] }
+        permissions:
+          type: array
+          items: { type: string }
+          example: [family.manage, finance.view, finance.edit, todo.view, todo.edit, calendar.view, calendar.edit]
+    Invitation:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/Role' }
+        expires_at: { type: string, format: date-time }
+    ValidationError:
+      type: object
+      properties:
+        message: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: array, items: { type: string } }
+  responses:
+    Me:
+      description: The signed-in user
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Me' }
+    ValidationError:
+      description: Invalid input
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationError' }
+    Unauthorized:
+      description: Not signed in
+    Forbidden:
+      description: Not a family member, or the role lacks the permission
 paths:
   /ping:
     get:
@@ -18,3 +81,242 @@ paths:
                 properties:
                   service: { type: string, example: gateway }
                   status: { type: string, example: ok }
+
+  /auth/register:
+    post:
+      summary: Sign up; the new user becomes owner of a new family and is signed in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, password_confirmation]
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 10, description: At least 10 characters with letters and numbers }
+                password_confirmation: { type: string }
+                family_name: { type: string, description: "Defaults to \"<name>'s family\"" }
+      responses:
+        '201': { $ref: '#/components/responses/Me' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { description: Too many signups from this address }
+
+  /auth/login:
+    post:
+      summary: Sign in with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+                remember: { type: boolean, description: Keep the session after the browser closes }
+      responses:
+        '200': { $ref: '#/components/responses/Me' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { description: Five failed tries for this email and IP; wait a minute }
+
+  /auth/logout:
+    post:
+      summary: Sign out and end the session
+      security: [{ session: [] }]
+      responses:
+        '204': { description: Signed out }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/forgot-password:
+    post:
+      summary: Email a password reset link (same answer whether or not the email has an account)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200': { description: Link sent if the account exists }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/reset-password:
+    post:
+      summary: Set a new password with the token from the reset link
+      description: The emailed link opens `{FRONTEND_URL}/reset-password?token=...&email=...`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, email, password, password_confirmation]
+              properties:
+                token: { type: string }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 10 }
+                password_confirmation: { type: string }
+      responses:
+        '200': { description: Password changed; sign in with it }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /me:
+    get:
+      summary: The signed-in user with family, role and permissions
+      security: [{ session: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/Me' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /family:
+    get:
+      summary: The user's family and its members; pending invitations for owners
+      security: [{ session: [] }]
+      responses:
+        '200':
+          description: The family
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  members:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        user_id: { type: string }
+                        name: { type: string }
+                        email: { type: string }
+                        role: { $ref: '#/components/schemas/Role' }
+                  invitations:
+                    type: array
+                    description: Only for members with family.manage
+                    items: { $ref: '#/components/schemas/Invitation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /family/invitations:
+    post:
+      summary: Invite someone by email (needs family.manage)
+      description: |
+        Emails a link to `{FRONTEND_URL}/invite/{token}`, valid for 7 days. A new
+        invitation to the same email replaces the pending one. Emails that already
+        have a Famexus account can't be invited yet (one family per user).
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email }
+                role: { type: string, enum: [adult, child] }
+      responses:
+        '201':
+          description: Invitation sent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invitation' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /family/invitations/{id}:
+    delete:
+      summary: Revoke a pending invitation (needs family.manage)
+      security: [{ session: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Revoked }
+        '404': { description: No such invitation in this family }
+
+  /invitations/{token}:
+    get:
+      summary: What an invite link is for (public)
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The pending invitation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email: { type: string }
+                  role: { $ref: '#/components/schemas/Role' }
+                  family: { type: object, properties: { name: { type: string } } }
+                  invited_by: { type: [string, 'null'] }
+                  expires_at: { type: string, format: date-time }
+        '404': { description: Invalid, used, revoked or expired }
+
+  /invitations/{token}/accept:
+    post:
+      summary: Create the invitee's account in the family and sign them in (public)
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, password, password_confirmation]
+              properties:
+                name: { type: string }
+                password: { type: string, minLength: 10 }
+                password_confirmation: { type: string }
+      responses:
+        '201': { $ref: '#/components/responses/Me' }
+        '404': { description: Invalid, used, revoked or expired }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /hello:
+    get:
+      summary: Hello message from every service, asked in parallel
+      security: [{ session: [] }]
+      responses:
+        '200':
+          description: One entry per service; a failing service has ok=false
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        service: { type: string }
+                        ok: { type: boolean }
+                        message: { type: [string, 'null'] }
+
+  /finance/{path}:
+    summary: Forwarded to Wallit
+    description: |
+      Any method on `/finance/{path}` is sent to Wallit as `/api/v1/{path}` with the
+      query string and JSON body, and a 60 second RS256 token (iss famexus-gateway,
+      aud wallit, user_id, family_id, role, permissions). Wallit's status, body and
+      headers come back unchanged, except links to Wallit's internal address, which
+      are rewritten to `/api/v1/finance/...`. See wallit/docs/openapi.yaml for the paths.
+    parameters:
+      - { name: path, in: path, required: true, schema: { type: string }, example: settings }
+    get:
+      security: [{ session: [] }]
+      responses:
+        '200': { description: Wallit's answer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { description: Wallit is not reachable }
