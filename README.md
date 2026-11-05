@@ -30,6 +30,7 @@ curl http://localhost:8000/api/v1/hello   # 401 until you log in
 - **Signup** (`POST /api/v1/auth/register`): anyone can sign up; the new user becomes the `owner` of a new family.
 - **Invites**: the owner invites people by email with the `adult` or `child` role (`POST /api/v1/family/invitations`). The email links to `{FRONTEND_URL}/invite/{token}` (valid 7 days); the React app shows the invitation (`GET /api/v1/invitations/{token}`) and creates the account (`POST /api/v1/invitations/{token}/accept`). For now an email that already has an account can't be invited, because a user belongs to one family.
 - **Login / logout**: email + password, Sanctum cookie session. The React app first calls `GET /sanctum/csrf-cookie`, then sends the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN`. Five failed tries per email and IP lock login for a minute.
+- **No session**: signup, login, logout and accepting an invite return 400 for requests from a host not listed in `SANCTUM_STATEFUL_DOMAINS`, because Sanctum starts no session for them.
 - **Password reset**: `POST /api/v1/auth/forgot-password` emails a link to `{FRONTEND_URL}/reset-password?token=...&email=...`; the app posts it to `POST /api/v1/auth/reset-password`. Locally the emails land in Mailpit (http://localhost:8025).
 - **`GET /api/v1/me`**: the user with family, role and permissions.
 

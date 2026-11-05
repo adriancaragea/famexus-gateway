@@ -20,9 +20,9 @@ Route::prefix('v1')->group(function () {
 
     // Signing up, in and out, and password reset.
     Route::prefix('auth')->group(function () {
-        Route::post('/register', RegisterController::class)->middleware('throttle:6,1');
-        Route::post('/login', [SessionController::class, 'store']);
-        Route::post('/logout', [SessionController::class, 'destroy'])->middleware('auth:sanctum');
+        Route::post('/register', RegisterController::class)->middleware(['throttle:6,1', 'session']);
+        Route::post('/login', [SessionController::class, 'store'])->middleware('session');
+        Route::post('/logout', [SessionController::class, 'destroy'])->middleware(['auth:sanctum', 'session']);
         Route::post('/forgot-password', [PasswordResetController::class, 'sendLink'])->middleware('throttle:6,1');
         Route::post('/reset-password', [PasswordResetController::class, 'reset'])->middleware('throttle:6,1');
     });
@@ -30,7 +30,7 @@ Route::prefix('v1')->group(function () {
     // Invite links are opened before the person has an account.
     Route::middleware('throttle:30,1')->group(function () {
         Route::get('/invitations/{token}', [InvitationController::class, 'show']);
-        Route::post('/invitations/{token}/accept', [InvitationController::class, 'accept']);
+        Route::post('/invitations/{token}/accept', [InvitationController::class, 'accept'])->middleware('session');
     });
 
     Route::middleware('auth:sanctum')->group(function () {
